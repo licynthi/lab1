@@ -3,14 +3,22 @@
 //  -b <max iterations>
 //  -i <implementation: {"scalar", "vector"}>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <immintrin.h>
+#include <iostream>
 
+#define clock_cycle() __rdtsc()
+
+static uint64_t start_time;
+static uint64_t end_time;
 // CPU Scalar Mandelbrot set generation.
 // Based on the "optimized escape time algorithm" in
 // https://en.wikipedia.org/wiki/Plotting_algorithms_for_the_Mandelbrot_set
 void mandelbrot_cpu_scalar(uint32_t img_size, uint32_t max_iters, uint32_t *out) {
+    uint32_t total_iters = 0;
+    uint32_t total_cyc_time = 0;
     for (uint64_t i = 0; i < img_size; ++i) {
         for (uint64_t j = 0; j < img_size; ++j) {
             // Get the plane coordinate X for the image pixel.
@@ -22,6 +30,7 @@ void mandelbrot_cpu_scalar(uint32_t img_size, uint32_t max_iters, uint32_t *out)
             float y2 = 0.0f;
             float w = 0.0f;
             uint32_t iters = 0;
+            start_time = clock_cycle();
             while (x2 + y2 <= 4.0f && iters < max_iters) {
                 float x = x2 - y2 + cx;
                 float y = w - x2 - y2 + cy;
@@ -31,11 +40,17 @@ void mandelbrot_cpu_scalar(uint32_t img_size, uint32_t max_iters, uint32_t *out)
                 w = z * z;
                 ++iters;
             }
-
+            total_iters += iters;
+            end_time = clock_cycle();
+            auto delta = end_time - start_time;
+            total_cyc_time += delta;
             // Write result.
             out[i * img_size + j] = iters;
         }
     }
+    std::cout << "scalar: " << total_iters
+              << " cycles/iterations: " << double(total_cyc_time) / total_iters
+              << std::endl;
 }
 
 /// <--- your code here --->
@@ -45,6 +60,8 @@ void mandelbrot_cpu_vector(uint32_t img_size, uint32_t max_iters, uint32_t *out)
     auto lane = _mm512_set_ps(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
     auto x_scale = _mm512_set1_ps(2.5f / float(img_size));
     auto max_iters_vector = _mm512_set1_epi32(max_iters);
+    uint32_t total_iters = 0;
+    uint32_t total_cyc_time = 0;
     for (uint64_t i = 0; i < img_size; ++i) {
         // cy is constant for a given lane
         __m512 cy = _mm512_set1_ps((float(i) / float(img_size)) * 2.5f - 1.25f);
@@ -64,6 +81,7 @@ void mandelbrot_cpu_vector(uint32_t img_size, uint32_t max_iters, uint32_t *out)
             __m512 four = _mm512_set1_ps(4.0f);
             __mmask16 running = 0xffff;
 
+            start_time = clock_cycle();
             while (running) {
                 // mask_add checks whether or not to increment the bit element again
                 iters = _mm512_mask_add_epi32(iters, running, iters, increment);
@@ -77,11 +95,18 @@ void mandelbrot_cpu_vector(uint32_t img_size, uint32_t max_iters, uint32_t *out)
                 running &= _mm512_cmp_ps_mask(_mm512_add_ps(x2, y2), four, _CMP_LE_OQ);
                 running &= _mm512_cmp_epi32_mask(iters, max_iters_vector, _MM_CMPINT_LT);
             }
-
+            end_time = clock_cycle();
+            auto delta = end_time - start_time;
+            total_cyc_time += delta;
             // Write result.
             _mm512_storeu_si512((__m512i *)&out[i * img_size + j], iters);
+            total_iters +=
+                *std::max_element(&out[i * img_size + j], &out[i * img_size + j + 16]);
         }
     }
+    std::cout << "vector: " << total_iters
+              << " cycles/iterations: " << double(total_cyc_time) / total_iters
+              << std::endl;
 }
 
 /// <--- /your code here --->
@@ -90,13 +115,11 @@ void mandelbrot_cpu_vector(uint32_t img_size, uint32_t max_iters, uint32_t *out)
 ///          YOU DO NOT NEED TO MODIFY THE CODE BELOW HERE.                  ///
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <sys/types.h>
 #include <vector>
 
