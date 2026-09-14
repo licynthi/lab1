@@ -65,6 +65,7 @@ void mandelbrot_cpu_vector(uint32_t img_size, uint32_t max_iters, uint32_t *out)
             __mmask16 running = 0xffff;
 
             while (running) {
+                // mask_add checks whether or not to increment the bit element again
                 iters = _mm512_mask_add_epi32(iters, running, iters, increment);
                 __m512 x = _mm512_add_ps(_mm512_sub_ps(x2, y2), cx);
                 __m512 y = _mm512_add_ps(_mm512_sub_ps(_mm512_sub_ps(w, x2), y2), cy);
