@@ -41,7 +41,47 @@ void mandelbrot_cpu_scalar(uint32_t img_size, uint32_t max_iters, uint32_t *out)
 /// <--- your code here --->
 
 void mandelbrot_cpu_vector(uint32_t img_size, uint32_t max_iters, uint32_t *out) {
-    // TODO: Implement this function.
+    // This will be used to get the next lane elements based on j
+    auto lane = _mm512_set_ps(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+    auto x_scale = _mm512_set1_ps(2.5f / float(img_size));
+    auto max_iters_vector = _mm512_set1_epi32(max_iters);
+    for (uint64_t i = 0; i < img_size; ++i) {
+        // cy is constant for a given lane
+        __m512 cy = _mm512_set1_ps((float(i) / float(img_size)) * 2.5f - 1.25f);
+        for (uint64_t j = 0; j < img_size; j += 16) {
+            // Get the correct j elements based on offset and current j
+            __m512 jvector = _mm512_add_ps(_mm512_set1_ps(float(j)), lane);
+            // cx should be done element-wise per lane
+            __m512 cx = _mm512_mul_ps(jvector, x_scale);
+            cx = _mm512_sub_ps(cx, _mm512_set1_ps(2.0f));
+
+            // Innermost loop: start the recursion from z = 0.
+            __m512 x2 = _mm512_set1_ps(0.0f);
+            __m512 y2 = _mm512_set1_ps(0.0f);
+            __m512 w = _mm512_set1_ps(0.0f);
+            __m512i iters = _mm512_set1_epi32(0);
+            __m512i increment = _mm512_set1_epi32(1);
+            __m512 four = _mm512_set1_ps(4.0f);
+            __mmask16 running = 0xffff;
+
+            while (running) {
+                // mask_add checks whether or not to increment the bit element again
+                iters = _mm512_mask_add_epi32(iters, running, iters, increment);
+                __m512 x = _mm512_add_ps(_mm512_sub_ps(x2, y2), cx);
+                __m512 y = _mm512_add_ps(_mm512_sub_ps(_mm512_sub_ps(w, x2), y2), cy);
+                x2 = _mm512_mul_ps(x, x);
+                y2 = _mm512_mul_ps(y, y);
+                __m512 z = _mm512_add_ps(x, y);
+                w = _mm512_mul_ps(z, z);
+                // check if x2+y2 < 4.0 for next loop
+                running &= _mm512_cmp_ps_mask(_mm512_add_ps(x2, y2), four, _CMP_LE_OQ);
+                running &= _mm512_cmp_epi32_mask(iters, max_iters_vector, _MM_CMPINT_LT);
+            }
+
+            // Write result.
+            _mm512_storeu_si512((__m512i *)&out[i * img_size + j], iters);
+        }
+    }
 }
 
 /// <--- /your code here --->
